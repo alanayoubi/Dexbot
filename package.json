@@ -1,7 +1,7 @@
 {
-  "name": "codex-telegram-bridge",
+  "name": "dexbot-codex-telegram",
   "version": "0.1.0",
-  "description": "",
+  "description": "Dexbot: run Codex through Telegram with layered memory, skills, scheduling, and onboarding.",
   "main": "index.js",
   "scripts": {
     "test": "node --test",
@@ -10,9 +10,16 @@
     "onboard": "node scripts/onboard.mjs",
     "tg:topic": "bash scripts/create-telegram-topic.sh"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "codex",
+    "telegram",
+    "automation",
+    "ai-agent",
+    "memory",
+    "dexbot"
+  ],
+  "author": "Dexbot Maintainers",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "better-sqlite3": "^12.6.2",
