@@ -69,6 +69,7 @@ export const settings = {
     modelProvider: process.env.CODEX_MODEL_PROVIDER || null,
     approvalPolicy: process.env.CODEX_APPROVAL_POLICY || 'never',
     sandbox: process.env.CODEX_SANDBOX || 'danger-full-access',
+    accessProfile: (process.env.CODEX_ACCESS_PROFILE || '').trim().toLowerCase() || null,
     personality: process.env.CODEX_PERSONALITY || null,
     enableMultiAgent: bool('CODEX_ENABLE_MULTI_AGENT', true),
     enableChildAgentsMd: bool('CODEX_ENABLE_CHILD_AGENTS_MD', false)
@@ -137,6 +138,9 @@ export function ensureSafeConfigWarnings() {
     if (!settings.allowedTelegramChatIds.length) {
       console.warn('[security] ALLOWED_TELEGRAM_CHAT_IDS is empty while group mode is enabled. Any chat can reach access checks.');
     }
+  }
+  if (settings.codex.accessProfile === 'full') {
+    console.warn('[security] CODEX_ACCESS_PROFILE=full selected. This is high-risk and should only run on an isolated machine.');
   }
   if (settings.codex.sandbox === 'danger-full-access') {
     console.warn('[security] CODEX_SANDBOX is danger-full-access. Use only on an isolated machine.');

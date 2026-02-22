@@ -69,7 +69,55 @@ function boolLabel(value, fallback = false) {
   return parseBoolish(value, fallback) ? 'true' : 'false';
 }
 
+function inferAccessProfile(sandbox, approval) {
+  const s = String(sandbox || '').trim();
+  const a = String(approval || '').trim();
+  if (s === 'danger-full-access' && a === 'never') {
+    return 'full';
+  }
+  if (s === 'workspace-write' && a === 'on-request') {
+    return 'partial';
+  }
+  if (s === 'read-only' && (a === 'on-request' || a === 'untrusted')) {
+    return 'readonly';
+  }
+  return 'custom';
+}
+
+function accessPreset(profile) {
+  if (profile === 'full') {
+    return {
+      sandbox: 'danger-full-access',
+      approval: 'never'
+    };
+  }
+  if (profile === 'partial') {
+    return {
+      sandbox: 'workspace-write',
+      approval: 'on-request'
+    };
+  }
+  if (profile === 'readonly') {
+    return {
+      sandbox: 'read-only',
+      approval: 'on-request'
+    };
+  }
+  return null;
+}
+
+function accessProfileLabel(profile) {
+  if (profile === 'full') return 'full';
+  if (profile === 'partial') return 'partial';
+  if (profile === 'readonly') return 'read-only';
+  return 'custom';
+}
+
 function configSnapshot(envText, cwd) {
+  const sandbox = parseCurrentValue(envText, 'CODEX_SANDBOX', 'danger-full-access');
+  const approval = parseCurrentValue(envText, 'CODEX_APPROVAL_POLICY', 'never');
+  const explicitProfile = parseCurrentValue(envText, 'CODEX_ACCESS_PROFILE', '').toLowerCase();
+  const inferred = inferAccessProfile(sandbox, approval);
   return {
     telegramToken: parseCurrentValue(envText, 'TELEGRAM_BOT_TOKEN', ''),
     allowedUsers: parseCurrentValue(envText, 'ALLOWED_TELEGRAM_USER_IDS', ''),
@@ -77,8 +125,9 @@ function configSnapshot(envText, cwd) {
     privateOnly: parseCurrentValue(envText, 'TELEGRAM_PRIVATE_ONLY', 'true'),
     requireMention: parseCurrentValue(envText, 'TELEGRAM_GROUP_REQUIRE_MENTION', 'true'),
     codexCwd: parseCurrentValue(envText, 'CODEX_CWD', cwd),
-    sandbox: parseCurrentValue(envText, 'CODEX_SANDBOX', 'danger-full-access'),
-    approval: parseCurrentValue(envText, 'CODEX_APPROVAL_POLICY', 'never'),
+    sandbox,
+    approval,
+    accessProfile: explicitProfile || inferred,
     botName: parseCurrentValue(envText, 'BOT_APP_NAME', 'Dexbot')
   };
 }
@@ -111,6 +160,7 @@ function printConfigSummary(snapshot) {
   }
   console.log(`- TELEGRAM_GROUP_REQUIRE_MENTION: ${boolLabel(snapshot.requireMention, true)}`);
   console.log(`- CODEX_CWD: ${snapshot.codexCwd || '(missing)'}`);
+  console.log(`- Access profile: ${accessProfileLabel(snapshot.accessProfile)}`);
   console.log(`- CODEX_SANDBOX: ${snapshot.sandbox || '(missing)'}`);
   console.log(`- CODEX_APPROVAL_POLICY: ${snapshot.approval || '(missing)'}`);
 }
@@ -220,6 +270,7 @@ async function main() {
         codexCwd: cwd,
         sandbox: 'danger-full-access',
         approval: 'never',
+        accessProfile: 'full',
         botName: 'Dexbot'
       }
       : existing;
@@ -255,8 +306,46 @@ async function main() {
     const requireMention = parseBoolish(mentionRaw, parseBoolish(defaults.requireMention, true));
 
     const codexCwd = (await rl.question(`CODEX_CWD [${defaults.codexCwd}]: `)).trim() || defaults.codexCwd;
-    const sandbox = (await rl.question(`CODEX_SANDBOX (read-only/workspace-write/danger-full-access) [${defaults.sandbox}]: `)).trim() || defaults.sandbox;
-    const approval = (await rl.question(`CODEX_APPROVAL_POLICY (untrusted/on-request/never) [${defaults.approval}]: `)).trim() || defaults.approval;
+
+    const defaultProfileLetter = (
+      defaults.accessProfile === 'full' ? 'f'
+        : defaults.accessProfile === 'partial' ? 'p'
+          : defaults.accessProfile === 'readonly' ? 'r'
+            : 'c'
+    );
+    console.log('\nSecurity warning:');
+    console.log('- Full access allows Codex to execute machine-level commands with minimal restrictions.');
+    console.log('- Use full access only on an isolated machine you control.');
+    console.log('- You accept all operational and security risk when enabling full access.');
+    const profileRaw = await rl.question(
+      `Access level: [F]ull (recommended only on isolated machine), [P]artial, [R]ead-only, [C]ustom [${defaultProfileLetter.toUpperCase()}]: `
+    );
+    const profileLetter = String(profileRaw || '').trim().toLowerCase()[0] || defaultProfileLetter;
+    let selectedProfile = 'custom';
+    if (profileLetter === 'f') selectedProfile = 'full';
+    else if (profileLetter === 'p') selectedProfile = 'partial';
+    else if (profileLetter === 'r') selectedProfile = 'readonly';
+
+    let sandbox = defaults.sandbox;
+    let approval = defaults.approval;
+    const preset = accessPreset(selectedProfile);
+    if (preset) {
+      sandbox = preset.sandbox;
+      approval = preset.approval;
+      if (selectedProfile === 'full') {
+        const ack = (await rl.question('Type FULL to confirm high-risk full access [cancel]: ')).trim();
+        if (ack !== 'FULL') {
+          console.log('Full access not confirmed. Falling back to partial profile.');
+          const fallback = accessPreset('partial');
+          sandbox = fallback.sandbox;
+          approval = fallback.approval;
+          selectedProfile = 'partial';
+        }
+      }
+    } else {
+      sandbox = (await rl.question(`CODEX_SANDBOX (read-only/workspace-write/danger-full-access) [${defaults.sandbox}]: `)).trim() || defaults.sandbox;
+      approval = (await rl.question(`CODEX_APPROVAL_POLICY (untrusted/on-request/never) [${defaults.approval}]: `)).trim() || defaults.approval;
+    }
     const botName = (await rl.question(`BOT_APP_NAME [${defaults.botName || 'Dexbot'}]: `)).trim() || defaults.botName || 'Dexbot';
 
     envText = await fs.readFile(envPath, 'utf8').catch(() => '');
@@ -269,6 +358,7 @@ async function main() {
       CODEX_CWD: codexCwd,
       CODEX_SANDBOX: sandbox,
       CODEX_APPROVAL_POLICY: approval,
+      CODEX_ACCESS_PROFILE: selectedProfile,
       AUTO_SPAWN_APP_SERVER: 'true',
       SKILLS_ROOT: './.agents/skills',
       SKILLS_INCLUDE_CODEX_HOME: 'true',

@@ -1,6 +1,6 @@
 # Dexbot: Codex for Everyday Automation
 
-Bring the power of Codex to be your own, the most powerful AI assistant you can have.
+Turn Codex into your personal operations engine: a Telegram-native AI assistant that can plan, execute, and follow through.
 
 Dexbot brings Codex power into daily life and business workflows through Telegram.
 It gives you a practical way to run a full Codex agent from chat, with memory, skills, scheduling, files, voice, and topic-scoped sessions.
@@ -95,6 +95,8 @@ The onboarding wizard:
 - can run `codex login` only when you choose it
 - detects existing `.env` setup and shows current Telegram/security config
 - offers modes: keep current, update existing, or reset from scratch
+- warns clearly about machine access risk and asks for explicit full-access confirmation
+- lets users choose access profile: full, partial, read-only, or custom
 - collects Telegram settings
 - writes `.env` and sets secure permissions (`chmod 600`)
 
@@ -193,13 +195,27 @@ Notes:
 - Use a smaller/faster model like `WHISPER_MODEL=base` or `WHISPER_MODEL=tiny`
 - Set `WHISPER_LANGUAGE=en` (or your language) to skip repeated language detection
 
-## Full-access mode
+## Access Levels
 
-Default env includes:
-- `CODEX_APPROVAL_POLICY=never`
-- `CODEX_SANDBOX=danger-full-access`
+Dexbot supports multiple Codex access profiles during onboarding:
+- `full`
+  - `CODEX_SANDBOX=danger-full-access`
+  - `CODEX_APPROVAL_POLICY=never`
+  - Highest power, highest risk. Recommended only on isolated machines.
+- `partial`
+  - `CODEX_SANDBOX=workspace-write`
+  - `CODEX_APPROVAL_POLICY=on-request`
+  - Good balance for most users.
+- `read-only`
+  - `CODEX_SANDBOX=read-only`
+  - `CODEX_APPROVAL_POLICY=on-request`
+  - Safer mode for exploration and audits.
+- `custom`
+  - You choose sandbox/approval manually.
 
-Use only on an isolated machine.
+Risk notice:
+- Any high-access configuration can execute impactful commands.
+- Use at your own risk and isolate this runtime from sensitive environments.
 
 ## Sharing With Friends
 

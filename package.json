@@ -1,7 +1,7 @@
 {
   "name": "dexbot-codex-telegram",
   "version": "0.1.0",
-  "description": "Dexbot: run Codex through Telegram with layered memory, skills, scheduling, and onboarding.",
+  "description": "Dexbot is a Telegram-native Codex agent for automation, memory, skills, scheduling, and file workflows.",
   "main": "index.js",
   "scripts": {
     "test": "node --test",
