@@ -20,7 +20,7 @@
     "dexbot"
   ],
   "author": "Dexbot Maintainers",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "dependencies": {
     "better-sqlite3": "^12.6.2",

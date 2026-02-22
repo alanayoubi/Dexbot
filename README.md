@@ -255,6 +255,20 @@ Security reminder for shared installs:
 - Use strict allowlists (`ALLOWED_TELEGRAM_USER_IDS`, optional `ALLOWED_TELEGRAM_CHAT_IDS`).
 - Keep `.env` mode at `600`.
 
+## License
+
+Dexbot uses a dual-license model:
+- Open-source: `AGPL-3.0-only` (see `LICENSE`)
+- Commercial: available by separate agreement (see `COMMERCIAL_LICENSE.md`)
+
+What this means:
+- If you use Dexbot under AGPL, commercial use is allowed only under AGPL terms and obligations.
+- If you need proprietary/closed-source or special commercial terms, request a commercial license.
+
+Brand protection:
+- The code is licensed as above, but the `Dexbot` name/brand is protected separately.
+- See `TRADEMARK_POLICY.md`.
+
 ## Security Notes
 
 - Access gate is user-ID based using `ALLOWED_TELEGRAM_USER_IDS`.
