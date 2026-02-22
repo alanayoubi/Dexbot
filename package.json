@@ -1,0 +1,23 @@
+{
+  "name": "codex-telegram-bridge",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "onboard": "node scripts/onboard.mjs",
+    "tg:topic": "bash scripts/create-telegram-topic.sh"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.3.1",
+    "telegraf": "^4.16.3",
+    "ws": "^8.19.0"
+  }
+}
