@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "onboard": "node scripts/onboard.mjs",
+    "publish:github": "bash scripts/publish-github.sh",
     "tg:topic": "bash scripts/create-telegram-topic.sh"
   },
   "keywords": [

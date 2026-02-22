@@ -218,6 +218,20 @@ Recommended distribution flow:
 4. User runs `npm run onboard`.
 5. User runs `npm run start`.
 
+Publish to GitHub (maintainer flow):
+
+```bash
+brew install gh
+gh auth login --web
+bash scripts/publish-github.sh <owner/repo> public
+```
+
+Or with npm:
+
+```bash
+npm run publish:github -- <owner/repo> public
+```
+
 Security reminder for shared installs:
 - Keep `.env` out of git.
 - Use strict allowlists (`ALLOWED_TELEGRAM_USER_IDS`, optional `ALLOWED_TELEGRAM_CHAT_IDS`).
