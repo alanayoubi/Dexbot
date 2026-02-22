@@ -1,5 +1,7 @@
 # Dexbot: Codex for Everyday Automation
 
+Bring the power of Codex to be your own, the most powerful AI assistant you can have.
+
 Dexbot brings Codex power into daily life and business workflows through Telegram.
 It gives you a practical way to run a full Codex agent from chat, with memory, skills, scheduling, files, voice, and topic-scoped sessions.
 
@@ -16,8 +18,8 @@ Important:
 ## Quick Start
 
 ```bash
-git clone https://github.com/<your-user>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/alanayoubi/Dexbot.git
+cd Dexbot
 npm install
 npm run onboard
 npm run start
