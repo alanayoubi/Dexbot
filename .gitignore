@@ -8,3 +8,5 @@ downloads-snapshot.png
 AGENTS.md
 *.log
 *.pid
+__pycache__/
+*.pyc
