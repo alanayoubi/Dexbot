@@ -45,17 +45,52 @@ function cleanNameCandidate(raw) {
   );
 }
 
-function deriveNameFromPhrase(raw) {
-  const tokens = String(raw || '')
+function isGenericNameCandidate(name) {
+  const tokens = String(name || '')
     .toLowerCase()
     .match(/[a-z0-9]+/g) || [];
-  const drop = new Set([
-    'a', 'an', 'the', 'my', 'our', 'skill', 'skills', 'for', 'to', 'and', 'with', 'of',
-    'create', 'make', 'build', 'add', 'generate', 'setup', 'set', 'up', 'please', 'can',
-    'you', 'from', 'called', 'named'
+  if (!tokens.length) {
+    return true;
+  }
+
+  const pronouns = new Set(['it', 'this', 'that', 'these', 'those', 'something', 'anything', 'everything', 'thing', 'stuff', 'one']);
+  const articles = new Set(['a', 'an', 'the', 'my', 'our', 'your']);
+  const genericWords = new Set([
+    'skill', 'skills', 'info', 'information', 'details', 'content', 'conversation',
+    'message', 'text', 'prompt', 'future'
   ]);
-  const kept = tokens.filter((t) => !drop.has(t)).slice(0, 5);
-  return kept.join(' ');
+
+  if (tokens.length === 1 && (pronouns.has(tokens[0]) || genericWords.has(tokens[0]))) {
+    return true;
+  }
+  if (tokens.length <= 3 && tokens.every((t) => pronouns.has(t) || articles.has(t) || genericWords.has(t))) {
+    return true;
+  }
+  if (articles.has(tokens[tokens.length - 1])) {
+    return true;
+  }
+  return false;
+}
+
+function hasNaturalSkillCreateIntent(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+
+  if (lower.startsWith('/skill')) return false;
+  if (!/\bskill\b/.test(lower)) return false;
+  if (/\bhow\s+do\s+i\b/.test(lower) || /\bhow\s+to\b/.test(lower)) return false;
+
+  if (/\b(create|make|build|add|generate|setup|set up)\b/.test(lower)) {
+    return true;
+  }
+  if (/\bturn\b[\s\S]{0,160}\binto\s+(?:a\s+)?skill\b/i.test(text)) {
+    return true;
+  }
+  if (/\bconvert\b[\s\S]{0,160}\binto\s+(?:a\s+)?skill\b/i.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 export function normalizeSkillName(rawName) {
@@ -71,54 +106,32 @@ export function parseNaturalSkillCreateRequest(text) {
   if (!raw) {
     return null;
   }
-  const lower = raw.toLowerCase();
-  if (!/\bskill\b/.test(lower)) {
-    return null;
-  }
-  if (!/\b(create|make|build|add|generate|setup|set up)\b/.test(lower)) {
-    return null;
-  }
-  if (lower.startsWith('/skill')) {
-    return null;
-  }
+  if (!hasNaturalSkillCreateIntent(raw)) return null;
 
+  const lower = raw.toLowerCase();
   const parts = raw.split('|').map((p) => p.trim());
   let nameCandidate = '';
   let description = '';
   let instructions = '';
   let hasExplicitNameSignal = false;
 
-  if (/\bhow\s+do\s+i\b/.test(lower) || /\bhow\s+to\b/.test(lower)) {
-    return null;
-  }
-
   const calledMatch = raw.match(/\b(?:called|named)\s+["'`]?([a-zA-Z0-9][a-zA-Z0-9 _-]{1,80}?)(?=["'`]?(\s+\bfor\b|\s*:|[|,.!?]|$))/i);
   if (calledMatch) {
-    nameCandidate = cleanNameCandidate(calledMatch[1]);
-    hasExplicitNameSignal = true;
+    const maybe = cleanNameCandidate(calledMatch[1]);
+    if (!isGenericNameCandidate(maybe)) {
+      nameCandidate = maybe;
+      hasExplicitNameSignal = true;
+    }
   }
 
   if (!nameCandidate) {
     const prefixNameMatch = raw.match(/\b(?:create|make|build|add|generate|setup|set up)\s+(?:a|an|new)?\s*([a-zA-Z0-9][a-zA-Z0-9 _-]{1,80})\s+skill\b/i);
     if (prefixNameMatch) {
-      nameCandidate = cleanNameCandidate(prefixNameMatch[1]);
-      hasExplicitNameSignal = true;
-    }
-  }
-
-  if (!nameCandidate) {
-    const forMatch = raw.match(/\bskill\s+for\s+([^|,.!?]{3,120})/i);
-    if (forMatch) {
-      nameCandidate = cleanNameCandidate(forMatch[1]);
-      hasExplicitNameSignal = true;
-    }
-  }
-
-  if (!nameCandidate && parts.length) {
-    const maybe = parts[0].replace(/\bcreate\b/ig, '').replace(/\bskill\b/ig, '').trim();
-    if (maybe.length >= 3) {
-      nameCandidate = cleanNameCandidate(maybe);
-      hasExplicitNameSignal = true;
+      const maybe = cleanNameCandidate(prefixNameMatch[1]);
+      if (!isGenericNameCandidate(maybe)) {
+        nameCandidate = maybe;
+        hasExplicitNameSignal = true;
+      }
     }
   }
 
@@ -126,12 +139,7 @@ export function parseNaturalSkillCreateRequest(text) {
     return null;
   }
 
-  if (!nameCandidate) {
-    const fallback = deriveNameFromPhrase(raw);
-    nameCandidate = cleanNameCandidate(fallback);
-  }
-
-  if (!nameCandidate) {
+  if (!hasExplicitNameSignal || !nameCandidate) {
     return null;
   }
 
@@ -158,6 +166,14 @@ export function parseNaturalSkillCreateRequest(text) {
     description,
     instructions
   };
+}
+
+export function isNaturalSkillCreateMissingName(text) {
+  const raw = String(text || '').trim();
+  if (!hasNaturalSkillCreateIntent(raw)) {
+    return false;
+  }
+  return parseNaturalSkillCreateRequest(raw) == null;
 }
 
 function buildSkillMarkdown({ name, description, instructions = '' }) {

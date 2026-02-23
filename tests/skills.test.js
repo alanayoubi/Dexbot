@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   buildSkillRunPrompt,
   createSkillManager,
+  isNaturalSkillCreateMissingName,
   normalizeSkillName,
   parseNaturalSkillCreateRequest
 } from '../src/skills.js';
@@ -114,4 +115,40 @@ test('parseNaturalSkillCreateRequest ignores generic questions', () => {
     'How do I create a skill in this bot?'
   );
   assert.equal(parsed, null);
+});
+
+test('parseNaturalSkillCreateRequest ignores generic "make it a skill" phrasing', () => {
+  const parsed = parseNaturalSkillCreateRequest(
+    'Please make it a skill and make sure it is available for use in future.'
+  );
+  assert.equal(parsed, null);
+});
+
+test('parseNaturalSkillCreateRequest ignores long ambiguous requests without explicit name', () => {
+  const parsed = parseNaturalSkillCreateRequest(
+    'We will be creating a lot of sales pages, so put all this information into a skill using codex format and make it available for future.'
+  );
+  assert.equal(parsed, null);
+});
+
+test('parseNaturalSkillCreateRequest ignores screenshot-style long sentence without explicit name', () => {
+  const parsed = parseNaturalSkillCreateRequest(
+    'This is very good, can we also make skill creation requests same way, for example when I ask you turn something into a skill without telling you what to call it, you do not immediately jump into creating file.'
+  );
+  assert.equal(parsed, null);
+});
+
+test('isNaturalSkillCreateMissingName flags missing-name creation intent', () => {
+  assert.equal(
+    isNaturalSkillCreateMissingName(
+      'Please make it a skill and keep it for future use.'
+    ),
+    true
+  );
+  assert.equal(
+    isNaturalSkillCreateMissingName(
+      'Create a skill called sales-pages for landing page copywriting.'
+    ),
+    false
+  );
 });

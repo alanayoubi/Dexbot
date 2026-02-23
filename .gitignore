@@ -10,3 +10,4 @@ AGENTS.md
 *.pid
 __pycache__/
 *.pyc
+tmp-*/

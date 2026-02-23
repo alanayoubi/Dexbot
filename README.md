@@ -108,6 +108,24 @@ Voice messages are supported with local Whisper. Default config expects `whisper
 You can tune model/language/timeouts with `WHISPER_*` env vars in `.env`.
 For faster turnaround, persistent mode keeps the Whisper model loaded between messages (`WHISPER_PERSISTENT=true`).
 
+YouTube/audio transcription with AssemblyAI is available via script:
+
+```bash
+npm run yt:transcribe -- "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Requirements:
+- `yt-dlp`
+- `ffmpeg`
+- `curl`
+- `jq`
+- `ASSEMBLYAI_API_KEY` in `.env`
+
+The script downloads audio, converts it to WAV, uploads to AssemblyAI, polls completion, and writes:
+- `data/transcripts/<timestamp>/transcript.txt`
+- `data/transcripts/<timestamp>/transcript.json`
+- `data/transcripts/<timestamp>/report.md`
+
 ## Commands
 
 - `/start`
@@ -159,12 +177,13 @@ You can also trigger a skill directly in normal chat with:
 $sales-page <task>
 ```
 
-Natural creation is also supported in plain conversation, for example:
+Skill creation via command:
 
 ```text
-Create a skill called sales-page for writing high-conversion landing pages.
-Create a cold-email skill for outbound campaigns: ask for ICP, offer, CTA, then draft 3 variants.
+/skill create <name> | <description> | <instructions>
 ```
+
+Natural-language creation is also supported through Codex intent (not simple keyword automation). If the intent/name is unclear, the assistant should ask follow-up questions before creating anything.
 
 ## Proactive Cron + Heartbeats
 

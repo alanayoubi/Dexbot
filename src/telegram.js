@@ -4,28 +4,60 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { Telegraf } from 'telegraf';
 import { transcribeTelegramFile } from './transcription.js';
-import { computeNextRunIso, cronFromDailyTime, parseScheduleSpec, validateTimeZone } from './schedule.js';
+import {
+  computeNextRunIso,
+  parseScheduleSpec,
+  validateTimeZone
+} from './schedule.js';
 import {
   buildSkillRunPrompt,
   createSkillManager,
-  normalizeSkillName,
-  parseNaturalSkillCreateRequest
+  normalizeSkillName
 } from './skills.js';
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff', '.svg']);
 const URL_IMAGE_RE = /https?:\/\/[^\s"'`<>]+\.(?:png|jpe?g|gif|webp|bmp|tiff?|svg)(?:\?[^\s"'`<>]*)?/gi;
 const ABS_PATH_IMAGE_RE = /\/[^\s"'`<>]+?\.(?:png|jpe?g|gif|webp|bmp|tiff?|svg)/gi;
 const ABS_PATH_FILE_RE = /\/[^\s"'`<>]+?\.[a-z0-9]{1,10}/gi;
+const SCHEDULE_ACTION_INSTRUCTIONS = [
+  'Automation actions available in this chat runtime:',
+  '- To create a schedule from the current conversation, output one line exactly:',
+  '  SCHEDULE_CREATE: {"kind":"report|heartbeat","scheduleSpec":"daily HH:MM or cron m h dom mon dow","timezone":"IANA timezone or empty","prompt":"what to send","confirmation":"optional short confirmation"}',
+  '- Only emit SCHEDULE_CREATE when the user clearly asked to schedule something.',
+  '- If intent is ambiguous, ask a concise clarification question in normal text and do not emit SCHEDULE_CREATE.'
+].join('\n');
 
 function clampTelegram(text) {
   if (!text) return '(empty response)';
   if (text.length <= 4000) return text;
-  return `${text.slice(0, 4000)}\n\n[truncated for Telegram; full output available in memory/session artifacts]`;
+  const limit = 4000;
+  const head = text.slice(0, limit);
+  let cut = head.lastIndexOf('\n\n');
+  if (cut < 120) cut = head.lastIndexOf('\n');
+  if (cut < 120) cut = head.lastIndexOf(' ');
+  if (cut < 120) cut = limit;
+  const safe = head.slice(0, cut).trimEnd();
+  return `${safe}\n\n[truncated for Telegram; full output available in memory/session artifacts]`;
 }
 
 function formatError(err) {
   const msg = err?.message || String(err);
   return `Error: ${msg.slice(0, 3000)}`;
+}
+
+function normalizeOutgoingText(text) {
+  const raw = String(text || '').replace(/\r\n?/g, '\n');
+  if (!raw.trim()) return '';
+
+  const lines = raw.split('\n').map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '';
+    const urlOnly = trimmed.match(/^[`'"]?(https?:\/\/[^\s`'"]+)[`'"]?$/i);
+    if (urlOnly) return urlOnly[1];
+    return line.replace(/\s+$/g, '');
+  });
+
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function normalizeRef(ref) {
@@ -49,6 +81,8 @@ function uniqueRefs(refs) {
 function parseOutputMarkers(text) {
   const imageRefs = [];
   const fileRefs = [];
+  const skillCreateSpecs = [];
+  const scheduleCreateSpecs = [];
   const lines = String(text || '').split('\n');
   const kept = [];
   for (const line of lines) {
@@ -62,13 +96,91 @@ function parseOutputMarkers(text) {
       fileRefs.push(fileMatch[1]);
       continue;
     }
+    const skillCreateMatch = line.match(/^\s*SKILL_CREATE:\s*(.+)\s*$/i);
+    if (skillCreateMatch) {
+      skillCreateSpecs.push(skillCreateMatch[1]);
+      continue;
+    }
+    const scheduleCreateMatch = line.match(/^\s*SCHEDULE_CREATE:\s*(.+)\s*$/i);
+    if (scheduleCreateMatch) {
+      scheduleCreateSpecs.push(scheduleCreateMatch[1]);
+      continue;
+    }
     kept.push(line);
   }
   const cleanText = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   return {
     cleanText,
     imageRefs: uniqueRefs(imageRefs),
-    fileRefs: uniqueRefs(fileRefs)
+    fileRefs: uniqueRefs(fileRefs),
+    skillCreateSpecs: uniqueRefs(skillCreateSpecs),
+    scheduleCreateSpecs: uniqueRefs(scheduleCreateSpecs)
+  };
+}
+
+function parseSkillCreateSpec(rawSpec) {
+  const parts = String(rawSpec || '').split('|').map((p) => p.trim());
+  const name = parts[0] || '';
+  if (!name) {
+    return null;
+  }
+  const description = parts[1] || '';
+  const instructions = parts.slice(2).join(' | ').trim();
+  return { name, description, instructions };
+}
+
+function extractFirstJsonObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = (fence?.[1] || raw).trim();
+  if (!body) return null;
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    // fall through
+  }
+
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  const candidate = body.slice(start, end + 1).trim();
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+export function parseScheduleCreateSpec(rawSpec, defaultTimezone) {
+  const parsed = extractFirstJsonObject(rawSpec);
+  if (!parsed || typeof parsed !== 'object') return null;
+
+  const kindRaw = String(parsed.kind || '').trim().toLowerCase();
+  const kind = kindRaw === 'heartbeat' ? 'heartbeat' : 'report';
+
+  const scheduleSpec = String(parsed.scheduleSpec || '').trim();
+  if (!scheduleSpec) return null;
+  parseScheduleSpec(scheduleSpec);
+
+  const tzRaw = String(parsed.timezone || '').trim();
+  const timezone = tzRaw || defaultTimezone;
+  if (!validateTimeZone(timezone)) {
+    throw new Error(`Invalid timezone "${timezone}". Example: tz=America/Los_Angeles`);
+  }
+
+  const prompt = String(parsed.prompt || '').trim();
+  if (!prompt) return null;
+
+  const confirmation = String(parsed.confirmation || parsed.confirmationMessage || '').trim();
+  return {
+    kind,
+    scheduleSpec,
+    timezone,
+    prompt,
+    confirmation
   };
 }
 
@@ -330,39 +442,151 @@ function shouldFlushStreamingChunk(text, force = false) {
   if (force) return String(text || '').length > 0;
   const raw = String(text || '');
   if (!raw) return false;
-  if (raw.length >= 260) return true;
-  return raw.length >= 90 && /(?:\s|[.!?]\s|\n)$/.test(raw);
+  return findStreamingFlushBoundary(raw) > 0;
 }
 
 function splitTelegramChunks(text, maxLen = 3900) {
-  const input = String(text || '');
+  const input = normalizeOutgoingText(text);
   if (!input) return [];
+
+  const splitSentenceLike = (paragraph) => {
+    const parts = [];
+    let cursor = 0;
+    const re = /([.!?]+["')\]]*\s+)/g;
+    let m;
+    while ((m = re.exec(paragraph)) !== null) {
+      const end = m.index + m[0].length;
+      const candidate = paragraph.slice(cursor, end).trim();
+      if (candidate) parts.push(candidate);
+      cursor = end;
+    }
+    const tail = paragraph.slice(cursor).trim();
+    if (tail) parts.push(tail);
+    return parts.length ? parts : [paragraph];
+  };
+
+  const splitOversizeParagraph = (paragraph) => {
+    const units = splitSentenceLike(paragraph);
+    const local = [];
+    let current = '';
+
+    const pushCurrent = () => {
+      const v = current.trim();
+      if (v) local.push(v);
+      current = '';
+    };
+
+    const pushTokenAware = (unitText) => {
+      const tokens = String(unitText || '').split(/\s+/).filter(Boolean);
+      for (const token of tokens) {
+        if (!current) {
+          current = token;
+          continue;
+        }
+        if (current.length + 1 + token.length <= maxLen) {
+          current += ` ${token}`;
+          continue;
+        }
+        pushCurrent();
+        current = token;
+      }
+    };
+
+    for (const unit of units) {
+      if (!unit) continue;
+      if (!current) {
+        if (unit.length <= maxLen) {
+          current = unit;
+        } else {
+          pushTokenAware(unit);
+        }
+        continue;
+      }
+
+      if (current.length + 1 + unit.length <= maxLen) {
+        current += ` ${unit}`;
+        continue;
+      }
+      pushCurrent();
+      if (unit.length <= maxLen) {
+        current = unit;
+      } else {
+        pushTokenAware(unit);
+      }
+    }
+
+    pushCurrent();
+    return local;
+  };
+
+  const paragraphs = input
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
   const chunks = [];
-  let start = 0;
+  let current = '';
 
-  while (start < input.length) {
-    if (input.length - start <= maxLen) {
-      chunks.push(input.slice(start));
-      break;
+  const pushCurrent = () => {
+    const value = current.trim();
+    if (value) chunks.push(value);
+    current = '';
+  };
+
+  for (const paragraph of paragraphs) {
+    const parts = paragraph.length <= maxLen ? [paragraph] : splitOversizeParagraph(paragraph);
+    for (const part of parts) {
+      if (!part) continue;
+      if (!current) {
+        current = part;
+        continue;
+      }
+      if (current.length + 2 + part.length <= maxLen) {
+        current += `\n\n${part}`;
+        continue;
+      }
+      pushCurrent();
+      current = part;
     }
-
-    const tentativeEnd = start + maxLen;
-    const windowText = input.slice(start, tentativeEnd);
-    let cutRel = windowText.lastIndexOf('\n\n');
-    if (cutRel < Math.floor(maxLen * 0.35)) cutRel = windowText.lastIndexOf('\n');
-    if (cutRel < Math.floor(maxLen * 0.35)) cutRel = windowText.lastIndexOf('. ');
-    if (cutRel < Math.floor(maxLen * 0.35)) {
-      cutRel = maxLen;
-    } else if (windowText[cutRel] === '.') {
-      cutRel += 1;
-    }
-
-    const end = Math.max(start + 1, start + cutRel);
-    chunks.push(input.slice(start, end));
-    start = end;
   }
 
-  return chunks.filter((c) => c.length > 0);
+  pushCurrent();
+  return chunks;
+}
+
+function findStreamingFlushBoundary(text) {
+  const raw = String(text || '');
+  if (!raw) return 0;
+
+  let boundary = raw.lastIndexOf('\n\n');
+  if (boundary >= 0) return boundary + 2;
+
+  const sentenceBoundary = raw.match(/[\s\S]*[.!?]+["')\]]*\s+$/);
+  if (sentenceBoundary && sentenceBoundary[0]) {
+    return sentenceBoundary[0].length;
+  }
+
+  boundary = raw.lastIndexOf('\n');
+  if (boundary >= 80) return boundary + 1;
+
+  if (raw.length >= 240) {
+    const ws = raw.lastIndexOf(' ');
+    if (ws >= 80) return ws + 1;
+  }
+
+  return 0;
+}
+
+function takeStreamingFlushSlice(text, force = false) {
+  const raw = String(text || '');
+  if (!raw) return { emit: '', rest: '' };
+  if (force) return { emit: raw, rest: '' };
+  const boundary = findStreamingFlushBoundary(raw);
+  if (boundary <= 0) return { emit: '', rest: raw };
+  return {
+    emit: raw.slice(0, boundary),
+    rest: raw.slice(boundary)
+  };
 }
 
 function fnv1a32(text) {
@@ -403,7 +627,8 @@ function topicExtra(ctx, extra = {}) {
 }
 
 async function replyText(ctx, text, extra = {}) {
-  return ctx.reply(text, topicExtra(ctx, extra));
+  const normalized = normalizeOutgoingText(text);
+  return ctx.reply(clampTelegram(normalized || text), topicExtra(ctx, extra));
 }
 
 async function sendTyping(ctx) {
@@ -488,41 +713,6 @@ function cleanGroupPrompt(ctx, text) {
   return stripLeadingMention(String(text || ''), user);
 }
 
-function parseHumanTimeToHHMM(rawText) {
-  const text = String(rawText || '').trim().toLowerCase();
-  if (!text) return null;
-
-  const m24 = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
-  if (m24) {
-    return `${m24[1].padStart(2, '0')}:${m24[2]}`;
-  }
-
-  const m12 = text.match(/\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm)\b/);
-  if (m12) {
-    let hour = Number(m12[1]);
-    const minute = Number(m12[2] || 0);
-    const ap = m12[3];
-    if (ap === 'am') {
-      if (hour === 12) hour = 0;
-    } else if (hour !== 12) {
-      hour += 12;
-    }
-    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-  }
-
-  return null;
-}
-
-function inferDailyTimeHint(text) {
-  const lowered = String(text || '').toLowerCase();
-  if (/\bmorning\b/.test(lowered)) return '09:00';
-  if (/\bnoon\b/.test(lowered)) return '12:00';
-  if (/\bafternoon\b/.test(lowered)) return '15:00';
-  if (/\bevening\b/.test(lowered)) return '18:00';
-  if (/\bnight\b/.test(lowered)) return '21:00';
-  return null;
-}
-
 function parsePipeArgs(text) {
   return String(text || '')
     .split('|')
@@ -539,108 +729,6 @@ function formatSkillPreview(content, maxLen = 3000) {
     return text;
   }
   return `${text.slice(0, maxLen - 24)}\n\n...[truncated preview]`;
-}
-
-function extractSchedulePromptFromText(text, kind) {
-  const raw = String(text || '').trim();
-  const lower = raw.toLowerCase();
-
-  const toIdx = lower.indexOf(' to ');
-  if (toIdx > 0) {
-    const p = raw.slice(toIdx + 4).trim();
-    if (p) return p;
-  }
-
-  const sendIdx = lower.indexOf('send me ');
-  if (sendIdx >= 0) {
-    return raw.slice(sendIdx).trim();
-  }
-
-  const remindIdx = lower.indexOf('remind me ');
-  if (remindIdx >= 0) {
-    return raw.slice(remindIdx).trim();
-  }
-
-  if (kind === 'heartbeat') {
-    return 'Check in proactively and keep me focused on priorities.';
-  }
-
-  return 'Send a concise proactive report based on current context, open loops, and recent decisions.';
-}
-
-function parseNaturalScheduleRequest(text, defaultTimezone) {
-  const input = String(text || '').trim();
-  if (!input) return null;
-  const lowered = input.toLowerCase();
-
-  const hasIntent = /\b(?:set|create|add|setup|schedule)\b/.test(lowered)
-    && /\b(?:schedule|reminder|heartbeat|report)\b/.test(lowered);
-  const hasRecurring = /\b(?:every|daily|weekday|weekdays|cron)\b/.test(lowered);
-  if (!hasIntent && !hasRecurring) {
-    return null;
-  }
-
-  const kind = /\bheartbeat\b/.test(lowered) ? 'heartbeat' : 'report';
-
-  let timezone = defaultTimezone;
-  const tzMatch = input.match(/\btz=([A-Za-z_+\-/]+)\b/i);
-  if (tzMatch) {
-    timezone = String(tzMatch[1] || '').trim();
-  }
-
-  let cronExpr = null;
-  let scheduleSpec = null;
-
-  const cronPrefix = input.match(/\bcron\s+([^\n|]+)$/i);
-  if (cronPrefix) {
-    const cronBody = cronPrefix[1].trim().replace(/\s+/g, ' ');
-    const parts = cronBody.split(' ').slice(0, 5);
-    if (parts.length === 5) {
-      cronExpr = parts.join(' ');
-      scheduleSpec = `cron ${cronExpr}`;
-    }
-  }
-
-  if (!cronExpr) {
-    const dailyToken = input.match(/\bdaily\s+([^\s|]+)\b/i);
-    let hhmm = dailyToken ? parseHumanTimeToHHMM(dailyToken[1]) : null;
-    if (!hhmm) {
-      const atMatch = input.match(/\bat\s+([^\n|]+?)\b(?:\s+to\s+|\s*$)/i);
-      hhmm = atMatch ? parseHumanTimeToHHMM(atMatch[1]) : null;
-    }
-    if (!hhmm) {
-      hhmm = inferDailyTimeHint(input);
-    }
-
-    if (hhmm) {
-      if (/\bweekdays?\b/.test(lowered)) {
-        const [h, m] = hhmm.split(':').map(Number);
-        cronExpr = `${m} ${h} * * 1-5`;
-        scheduleSpec = `cron ${cronExpr}`;
-      } else if (/\bevery\s+(mon|tue|wed|thu|fri|sat|sun)\b/i.test(lowered)) {
-        const day = lowered.match(/\bevery\s+(mon|tue|wed|thu|fri|sat|sun)\b/i)?.[1]?.toLowerCase();
-        const dayMap = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 0 };
-        const [h, m] = hhmm.split(':').map(Number);
-        cronExpr = `${m} ${h} * * ${dayMap[day]}`;
-        scheduleSpec = `cron ${cronExpr}`;
-      } else if (/\bevery\b|\bdaily\b|\bmorning\b|\bevening\b|\bnight\b|\bnoon\b/i.test(lowered)) {
-        cronExpr = cronFromDailyTime(hhmm);
-        scheduleSpec = `daily ${hhmm}`;
-      }
-    }
-  }
-
-  if (!cronExpr || !scheduleSpec) {
-    return null;
-  }
-
-  const prompt = extractSchedulePromptFromText(input, kind);
-  return {
-    kind,
-    scheduleSpec,
-    timezone,
-    prompt
-  };
 }
 
 export function createTelegramBot({
@@ -977,8 +1065,12 @@ export function createTelegramBot({
 
     try {
       const prepared = memory.prepareTurn(chatId, userPrompt);
+      const developerInstructions = [
+        String(prepared.developerInstructions || '').trim(),
+        SCHEDULE_ACTION_INSTRUCTIONS
+      ].filter(Boolean).join('\n\n');
       const threadId = await codex.ensureThread(prepared.state.thread_id || null, {
-        developerInstructions: prepared.developerInstructions
+        developerInstructions
       });
       if (threadId !== prepared.state.thread_id) {
         store.setThreadId(chatId, threadId);
@@ -1015,10 +1107,11 @@ export function createTelegramBot({
 
         flushBusy = true;
         try {
-          const out = pendingChunk;
-          await emitTextChunk(out);
-          sentLength += out.length;
-          pendingChunk = '';
+          const sliced = takeStreamingFlushSlice(pendingChunk, force);
+          if (!sliced.emit) return;
+          await emitTextChunk(sliced.emit);
+          sentLength += sliced.emit.length;
+          pendingChunk = sliced.rest;
           lastChunkSentAt = Date.now();
         } finally {
           flushBusy = false;
@@ -1065,8 +1158,17 @@ export function createTelegramBot({
       const fallbackFileRefs = extractFileRefsFallback(commandOutput);
       const imageRefs = uniqueRefs([...parsedFinal.imageRefs, ...fallbackRefs]).slice(0, 6);
       const fileRefs = uniqueRefs([...parsedFinal.fileRefs, ...fallbackFileRefs]).slice(0, 6);
+      const skillCreateSpec = parsedFinal.skillCreateSpecs
+        .map(parseSkillCreateSpec)
+        .find(Boolean) || null;
+      const scheduleCreateSpecs = parsedFinal.scheduleCreateSpecs
+        .map((raw) => parseScheduleCreateSpec(raw, scheduleDefaultTimezone))
+        .filter(Boolean);
 
-      const finalText = parsedFinal.cleanText || ((imageRefs.length || fileRefs.length) ? 'Done. Sending file output.' : '(empty response)');
+      const hasAutomationOutputs = Boolean(
+        imageRefs.length || fileRefs.length || skillCreateSpec || scheduleCreateSpecs.length
+      );
+      const finalText = parsedFinal.cleanText || (hasAutomationOutputs ? '' : '(empty response)');
 
       const consumed = sentLength + pendingChunk.length;
       if (finalText.length > consumed) {
@@ -1077,8 +1179,7 @@ export function createTelegramBot({
 
       if (!sentAnyContent && finalText) {
         await clearStatus();
-        await replyText(ctx, clampTelegram(finalText));
-        sentAnyContent = true;
+        await emitTextChunk(finalText);
       } else {
         await clearStatus();
       }
@@ -1088,6 +1189,50 @@ export function createTelegramBot({
       }
       for (const ref of fileRefs) {
         await sendFileReference(ctx, ref, codexCwd).catch(() => false);
+      }
+
+      if (skillCreateSpec) {
+        let skillMsg = '';
+        try {
+          const normalized = normalizeSkillName(skillCreateSpec.name);
+          const created = skillManager.createSkill({
+            name: normalized,
+            description: skillCreateSpec.description,
+            instructions: skillCreateSpec.instructions
+          });
+          skillMsg = [
+            `Skill created: $${created.name}`,
+            `path=${created.path}`,
+            '',
+            `Use it with: $${created.name} <task>`,
+            `Or: /skill run ${created.name} | <task>`
+          ].join('\n');
+        } catch (err) {
+          const txt = String(err?.message || err);
+          if (/already exists/i.test(txt)) {
+            skillMsg = `Skill already exists: $${normalizeSkillName(skillCreateSpec.name)}. Use /skill show ${normalizeSkillName(skillCreateSpec.name)} or run it directly.`;
+          } else {
+            skillMsg = `Skill creation failed: ${txt}`;
+          }
+        }
+        if (skillMsg) {
+          await replyText(ctx, skillMsg);
+        }
+      }
+
+      for (const spec of scheduleCreateSpecs) {
+        try {
+          const job = createScheduleForScope(conversation, {
+            kind: spec.kind,
+            scheduleSpec: spec.scheduleSpec,
+            timezone: spec.timezone,
+            prompt: spec.prompt
+          });
+          const confirm = spec.confirmation || 'Done. I scheduled it.';
+          await replyText(ctx, `${confirm}\n\nNext run: ${formatRunAt(job.next_run_at, job.timezone)}`);
+        } catch (err) {
+          await replyText(ctx, formatError(err)).catch(() => undefined);
+        }
       }
 
       const assistantForMemory = (imageRefs.length || fileRefs.length)
@@ -1164,7 +1309,7 @@ export function createTelegramBot({
       '/heartbeat - run memory maintenance now',
       '/schedule - manage proactive cron jobs',
       '/skill - create/list/show/run/delete skills',
-      'Natural skill creation also works (e.g. "create a skill called sales-page for ...").',
+      'Natural skill creation also works through Codex intent (not keyword auto-triggering).',
       '/restart - restart bot + Codex app-server',
       '/autostart [on|off|status] - control start on Mac reboot',
       '/chatid - show current chat id and topic id',
@@ -1404,7 +1549,7 @@ export function createTelegramBot({
       'Notes:',
       '- Skills are stored in Codex format: <root>/<skill-name>/SKILL.md',
       '- You can also trigger a skill directly in chat by starting with $skill-name',
-      '- Natural creation works too: "create a skill called <name> for ...".'
+      '- You can create skills with /skill create ... or natural language.'
     ].join('\n');
 
     if (!body) {
@@ -1667,7 +1812,7 @@ export function createTelegramBot({
     await replyText(ctx, clampTelegram(lines.join('\n')));
   });
 
-  bot.on('message', async (ctx) => {
+  bot.on('text', async (ctx) => {
     if (!isAllowed(ctx)) {
       await replyText(ctx, 'Access denied.');
       return;
@@ -1687,63 +1832,6 @@ export function createTelegramBot({
     const conversation = getConversationScope(ctx);
     const userPrompt = cleanGroupPrompt(ctx, text);
     if (!userPrompt) {
-      return;
-    }
-
-    const naturalSkillCreate = parseNaturalSkillCreateRequest(userPrompt);
-    if (naturalSkillCreate) {
-      try {
-        const normalized = normalizeSkillName(naturalSkillCreate.nameCandidate);
-        const created = skillManager.createSkill({
-          name: normalized,
-          description: naturalSkillCreate.description,
-          instructions: naturalSkillCreate.instructions
-        });
-        const message = [
-          `Skill created from conversation: $${created.name}`,
-          `path=${created.path}`,
-          '',
-          `Use it with: $${created.name} <task>`,
-          `Or: /skill run ${created.name} | <task>`
-        ].join('\n');
-        await replyText(ctx, message);
-        retainLocalTurn(conversation.scopedChatId, userPrompt, message);
-      } catch (err) {
-        const txt = String(err?.message || err);
-        if (/already exists/i.test(txt)) {
-          const msg = `Skill already exists: $${normalizeSkillName(naturalSkillCreate.nameCandidate)}. Use /skill show ${normalizeSkillName(naturalSkillCreate.nameCandidate)} or run it directly.`;
-          await replyText(ctx, msg);
-          retainLocalTurn(conversation.scopedChatId, userPrompt, msg);
-        } else {
-          await replyText(ctx, formatError(err)).catch(() => undefined);
-        }
-      }
-      return;
-    }
-
-    const naturalSchedule = parseNaturalScheduleRequest(userPrompt, scheduleDefaultTimezone);
-    if (naturalSchedule) {
-      try {
-        const tz = naturalSchedule.timezone || scheduleDefaultTimezone;
-        if (!validateTimeZone(tz)) {
-          await replyText(ctx, `Invalid timezone "${tz}". Example: tz=America/Los_Angeles`);
-          return;
-        }
-        const job = createScheduleForScope(conversation, {
-          kind: naturalSchedule.kind,
-          scheduleSpec: naturalSchedule.scheduleSpec,
-          timezone: tz,
-          prompt: naturalSchedule.prompt
-        });
-        await replyText(ctx, [
-          `Scheduled via natural request. #${job.id}`,
-          `kind=${job.kind}`,
-          `cron=${job.cron_expr}`,
-          `next=${formatRunAt(job.next_run_at, job.timezone)}`
-        ].join('\n'));
-      } catch (err) {
-        await replyText(ctx, formatError(err)).catch(() => undefined);
-      }
       return;
     }
 

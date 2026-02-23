@@ -467,7 +467,8 @@ export class MemoryEngine {
           'Runtime capabilities:',
           '- Full Codex CLI execution on this isolated machine.',
           '- Telegram commands: /newsession, /memory, /heartbeat, /schedule, /skill, /restart, /autostart, /chatid, /whoami.',
-          '- Natural skill creation is supported from plain conversation requests.',
+          '- Skills: create/list/show/run via /skill, explicit $skill-name trigger in prompts, and natural-language creation requests.',
+          '- For natural skill creation, emit exactly one line in the final reply when ready: SKILL_CREATE: <name> | <description> | <instructions>. If name is missing/ambiguous, ask a follow-up question and do not emit SKILL_CREATE.',
           '- Proactive schedules: recurring reports and heartbeat check-ins via /schedule.'
         ].join('\n')
       },
@@ -514,7 +515,7 @@ export class MemoryEngine {
     if (!/Telegram commands:/i.test(toolsText) || !/\/skill\b/i.test(toolsText) || !/Proactive schedules:/i.test(toolsText)) {
       appendText(
         this.paths.tools,
-        '\nRuntime capabilities:\n- Full Codex CLI execution on this isolated machine.\n- Telegram commands: /newsession, /memory, /heartbeat, /schedule, /skill, /restart, /autostart, /chatid, /whoami.\n- Skills: create/list/show/run via /skill, explicit $skill-name trigger in prompts, and natural-language creation requests.\n- Proactive schedules: recurring reports and heartbeat check-ins via /schedule.\n'
+        '\nRuntime capabilities:\n- Full Codex CLI execution on this isolated machine.\n- Telegram commands: /newsession, /memory, /heartbeat, /schedule, /skill, /restart, /autostart, /chatid, /whoami.\n- Skills: create/list/show/run via /skill and explicit $skill-name trigger in prompts.\n- Proactive schedules: recurring reports and heartbeat check-ins via /schedule.\n'
       );
     }
   }
@@ -612,7 +613,7 @@ export class MemoryEngine {
       '- Full Codex CLI execution with available local tools.',
       '- Telegram supports text, files, images, voice, and topic-scoped sessions.',
       '- Scheduling is available via /schedule and natural schedule requests.',
-      '- Skills are available via /skill, explicit $skill-name triggers, and natural-language create requests.',
+      '- Skills are available via /skill, explicit $skill-name triggers, and natural-language creation requests.',
       '- Keep memory behavior silent; never output internal memory/tool meta unless user asks.'
     ].join('\n');
 
