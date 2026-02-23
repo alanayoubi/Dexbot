@@ -417,3 +417,52 @@ export async function transcribeTelegramFile({
     await fsPromises.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
   }
 }
+
+export async function transcribeLocalAudioFile({
+  localPath,
+  inputExtension = '',
+  languageHint = null,
+  whisper
+}) {
+  if (!whisper?.enabled) {
+    throw new Error('Voice transcription is disabled (WHISPER_ENABLED=false).');
+  }
+
+  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'dexbot-whisper-local-'));
+  const extCandidate = inputExtension || path.extname(String(localPath || '')).replace('.', '') || 'ogg';
+  const safeExt = String(extCandidate).replace(/[^a-z0-9]/gi, '') || 'ogg';
+  const inputPath = path.join(tempRoot, `input.${safeExt}`);
+  const outputDir = path.join(tempRoot, 'out');
+  await fsPromises.mkdir(outputDir, { recursive: true });
+
+  const normalizedHint = normalizeLanguageHint(languageHint);
+  const language = whisper.language || normalizedHint || null;
+
+  try {
+    await fsPromises.copyFile(localPath, inputPath);
+
+    if (whisper.persistent) {
+      try {
+        const worker = getPersistentClient(whisper);
+        const text = await worker.transcribe(inputPath, {
+          language,
+          task: whisper.task,
+          timeoutMs: whisper.timeoutMs
+        });
+        if (text) return text;
+        throw new Error('Whisper worker returned an empty transcript.');
+      } catch (err) {
+        console.warn(`[whisper] persistent mode failed, falling back to CLI: ${err.message}`);
+      }
+    }
+
+    return await transcribeWithCli({
+      inputPath,
+      outputDir,
+      whisper,
+      language
+    });
+  } finally {
+    await fsPromises.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}

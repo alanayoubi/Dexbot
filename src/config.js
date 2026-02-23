@@ -83,6 +83,13 @@ export const settings = {
     handlerTimeoutMs: int('TELEGRAM_HANDLER_TIMEOUT_MS', 600000)
   },
 
+  dashboard: {
+    enabled: bool('DASHBOARD_ENABLED', true),
+    host: (process.env.DASHBOARD_HOST || '127.0.0.1').trim() || '127.0.0.1',
+    port: int('DASHBOARD_PORT', 8788),
+    authToken: (process.env.DASHBOARD_AUTH_TOKEN || '').trim()
+  },
+
   schedule: {
     pollIntervalMs: int('SCHEDULE_POLL_INTERVAL_MS', 15_000),
     defaultTimezone: (process.env.SCHEDULE_DEFAULT_TIMEZONE || defaultTz).trim() || 'UTC'
@@ -147,6 +154,12 @@ export function ensureSafeConfigWarnings() {
   }
   if (settings.codex.approvalPolicy === 'never') {
     console.warn('[security] CODEX_APPROVAL_POLICY is never. Commands run without manual approvals.');
+  }
+  if (settings.dashboard.enabled && settings.dashboard.host !== '127.0.0.1' && settings.dashboard.host !== 'localhost') {
+    console.warn('[security] DASHBOARD_HOST is not localhost. Exposing dashboard outside localhost is high risk.');
+  }
+  if (settings.dashboard.enabled && !settings.dashboard.authToken) {
+    console.warn('[security] DASHBOARD_AUTH_TOKEN is empty. Dashboard relies on localhost boundary only.');
   }
   if (settings.whisper.enabled && !settings.whisper.command) {
     console.warn('[config] WHISPER_ENABLED is true but WHISPER_COMMAND is empty.');

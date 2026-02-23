@@ -25,6 +25,12 @@ npm run onboard
 npm run start
 ```
 
+Then open the local dashboard:
+
+```text
+http://127.0.0.1:8788
+```
+
 ## What Is Implemented
 
 ### Memory layers
@@ -82,6 +88,33 @@ cp .env.example .env
 npm install
 npm run start
 ```
+
+### Local Dashboard
+
+Dexbot now includes a local web dashboard so users can:
+- chat with streaming updates from desktop (not only Telegram)
+- upload files/images directly to Codex
+- manage sessions/scopes
+- run slash command features from chat (`/memory`, `/schedule`, `/skill`, `/heartbeat`, `/newsession`, `/restart`, `/autostart`)
+- update `.env` settings from UI (Telegram IDs/chats/tokens and other env keys)
+- view runtime/account controls in a UI panel
+
+Dashboard env settings:
+
+```text
+DASHBOARD_ENABLED=true
+DASHBOARD_HOST=127.0.0.1
+DASHBOARD_PORT=8788
+# Optional but recommended:
+DASHBOARD_AUTH_TOKEN=<your-local-token>
+```
+
+If `DASHBOARD_AUTH_TOKEN` is set, dashboard API access is protected and authorized via secure local cookie.
+
+Environment settings security:
+- Secret keys are masked in UI and never returned in plaintext by settings APIs.
+- Saving settings writes `.env` atomically and enforces `chmod 600`.
+- Use “Restart after save” in dashboard settings to apply runtime changes immediately.
 
 For guided onboarding (recommended for new users):
 

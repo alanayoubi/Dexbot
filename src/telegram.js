@@ -45,11 +45,36 @@ function formatError(err) {
   return `Error: ${msg.slice(0, 3000)}`;
 }
 
+function stripMarkdownDecorations(text) {
+  let out = String(text || '');
+  if (!out) return out;
+
+  out = out.replace(/```(?:[a-zA-Z0-9_-]+)?\n?/g, '');
+  out = out.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '$1 ($2)');
+  out = out.replace(/<(https?:\/\/[^>\s]+)>/g, '$1');
+  out = out.replace(/^#{1,6}\s+/gm, '');
+  out = out.replace(/\*\*([^*\n]+)\*\*/g, '$1');
+  out = out.replace(/__([^_\n]+)__/g, '$1');
+  out = out.replace(/`([^`\n]+)`/g, '$1');
+  out = out.replace(/`+/g, '');
+
+  return out;
+}
+
+function normalizeSentenceSpacing(text) {
+  let out = String(text || '');
+  if (!out) return out;
+  // Fix common streamed merges like "done.Next" -> "done. Next"
+  out = out.replace(/([.!?]["')\]]*)([A-Z])/g, '$1 $2');
+  return out;
+}
+
 function normalizeOutgoingText(text) {
   const raw = String(text || '').replace(/\r\n?/g, '\n');
   if (!raw.trim()) return '';
+  const clean = normalizeSentenceSpacing(stripMarkdownDecorations(raw));
 
-  const lines = raw.split('\n').map((line) => {
+  const lines = clean.split('\n').map((line) => {
     const trimmed = line.trim();
     if (!trimmed) return '';
     const urlOnly = trimmed.match(/^[`'"]?(https?:\/\/[^\s`'"]+)[`'"]?$/i);
@@ -442,7 +467,9 @@ function shouldFlushStreamingChunk(text, force = false) {
   if (force) return String(text || '').length > 0;
   const raw = String(text || '');
   if (!raw) return false;
-  return findStreamingFlushBoundary(raw) > 0;
+  const boundary = findStreamingFlushBoundary(raw);
+  if (boundary <= 0) return false;
+  return boundary >= 120 || raw.length >= 240;
 }
 
 function splitTelegramChunks(text, maxLen = 3900) {
@@ -452,7 +479,7 @@ function splitTelegramChunks(text, maxLen = 3900) {
   const splitSentenceLike = (paragraph) => {
     const parts = [];
     let cursor = 0;
-    const re = /([.!?]+["')\]]*\s+)/g;
+    const re = /[.!?]+["')\]]*(?:\s+|(?=[A-Z])|$)/g;
     let m;
     while ((m = re.exec(paragraph)) !== null) {
       const end = m.index + m[0].length;
@@ -558,23 +585,29 @@ function findStreamingFlushBoundary(text) {
   const raw = String(text || '');
   if (!raw) return 0;
 
-  let boundary = raw.lastIndexOf('\n\n');
-  if (boundary >= 0) return boundary + 2;
+  const boundaries = [];
+  const sentenceRe = /[.!?]+["')\]]*(?:\s+|(?=[A-Z])|$)/g;
+  let m;
+  while ((m = sentenceRe.exec(raw)) !== null) {
+    boundaries.push(m.index + m[0].length);
+  }
+  if (!boundaries.length) return 0;
 
-  const sentenceBoundary = raw.match(/[\s\S]*[.!?]+["')\]]*\s+$/);
-  if (sentenceBoundary && sentenceBoundary[0]) {
-    return sentenceBoundary[0].length;
+  const minLen = 110;
+  const targetMax = 320;
+
+  for (const b of boundaries) {
+    if (b >= minLen && b <= targetMax) {
+      return b;
+    }
+  }
+  for (const b of boundaries) {
+    if (b > targetMax) {
+      return b;
+    }
   }
 
-  boundary = raw.lastIndexOf('\n');
-  if (boundary >= 80) return boundary + 1;
-
-  if (raw.length >= 240) {
-    const ws = raw.lastIndexOf(' ');
-    if (ws >= 80) return ws + 1;
-  }
-
-  return 0;
+  return boundaries[boundaries.length - 1];
 }
 
 function takeStreamingFlushSlice(text, force = false) {
@@ -1004,6 +1037,9 @@ export function createTelegramBot({
     const nowIso = now.toISOString();
     const due = store.listDueScheduledJobs(nowIso, 12);
     for (const job of due) {
+      if (Number(job.base_chat_id) < 0) {
+        continue;
+      }
       if (scheduleRunningJobIds.has(job.id)) {
         continue;
       }
@@ -1131,9 +1167,7 @@ export function createTelegramBot({
         const consumed = sentLength + pendingChunk.length;
         if (cleanLive.length <= consumed) return;
         pendingChunk += cleanLive.slice(consumed);
-        const silentMs = Date.now() - lastChunkSentAt;
-        const forceBySilence = pendingChunk.length >= 40 && silentMs >= 2200;
-        await flushPending(forceBySilence);
+        await flushPending(false);
       }, telegramSettings.streamEditIntervalMs);
 
       const result = await codex.runTurn({

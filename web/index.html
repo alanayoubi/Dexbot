@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dexbot Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,600;6..72,700&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="kicker">Dexbot</p>
+          <h1>Control Room</h1>
+          <p>Codex-powered operations with memory, skills, schedules, and files.</p>
+        </div>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Sessions</h2>
+            <button id="new-scope-btn" class="btn ghost" type="button">New</button>
+          </div>
+          <ul id="scope-list" class="scope-list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Quick Actions</h2>
+          <div class="quick-grid">
+            <button class="btn chip" data-command="/newsession" type="button">New Session</button>
+            <button class="btn chip" data-command="/memory" type="button">Memory</button>
+            <button class="btn chip" data-command="/heartbeat" type="button">Heartbeat</button>
+            <button class="btn chip" data-command="/schedule list" type="button">Schedules</button>
+            <button class="btn chip" data-command="/skill list" type="button">Skills</button>
+            <button class="btn chip" data-command="/help" type="button">Help</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="kicker">Current Scope</p>
+            <h2 id="scope-title">main</h2>
+          </div>
+          <div class="top-actions">
+            <button id="refresh-btn" class="btn ghost" type="button">Refresh</button>
+            <button id="settings-btn" class="btn" type="button">Account</button>
+          </div>
+        </header>
+
+        <div id="status-strip" class="status-strip" aria-live="polite"></div>
+
+        <section id="chat-log" class="chat-log" aria-live="polite"></section>
+
+        <form id="composer" class="composer">
+          <textarea id="chat-input" rows="3" placeholder="Ask Dexbot anything, or type /memory, /schedule, /skill..."></textarea>
+          <div id="file-chip-row" class="file-chip-row"></div>
+          <div class="composer-actions">
+            <label class="btn ghost file-picker">
+              Attach
+              <input id="file-input" type="file" multiple />
+            </label>
+            <button id="send-btn" class="btn" type="submit">Send</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <aside id="settings-drawer" class="settings-drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <h3>Account & Runtime</h3>
+        <button id="close-settings-btn" class="btn ghost" type="button">Close</button>
+      </div>
+
+      <section class="card">
+        <h4>Runtime</h4>
+        <pre id="runtime-summary" class="mono"></pre>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h4>Environment</h4>
+          <button id="reload-env-btn" class="btn ghost" type="button">Reload</button>
+        </div>
+        <p class="hint">Secrets are never shown. Enter a new value only when you want to rotate it.</p>
+        <div id="env-fields" class="env-fields"></div>
+        <label class="restart-toggle">
+          <input id="restart-after-save" type="checkbox" checked />
+          Restart bot after save
+        </label>
+        <button id="save-env-btn" class="btn" type="button">Save Environment</button>
+      </section>
+
+      <section class="card">
+        <h4>Autostart</h4>
+        <div class="inline-actions">
+          <button class="btn chip" data-autostart="status" type="button">Status</button>
+          <button class="btn chip" data-autostart="on" type="button">Enable</button>
+          <button class="btn chip" data-autostart="off" type="button">Disable</button>
+        </div>
+        <pre id="autostart-summary" class="mono"></pre>
+      </section>
+
+      <section class="card danger">
+        <h4>Restart</h4>
+        <p>Restarts bot and Codex app-server on this machine.</p>
+        <button id="restart-btn" class="btn danger" type="button">Restart Now</button>
+      </section>
+    </aside>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

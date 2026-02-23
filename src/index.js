@@ -8,6 +8,7 @@ import { MemoryStore } from './db.js';
 import { MemoryEngine } from './memory.js';
 import { createTelegramBot } from './telegram.js';
 import { createAutostartManager } from './autostart.js';
+import { createDashboardServer } from './dashboard.js';
 
 const TELEGRAM_COMMANDS = [
   { command: 'newsession', description: 'Start a new memory session' },
@@ -153,6 +154,7 @@ async function main() {
   await codex.start();
   const restartNoticePath = path.join(settings.memory.root, 'system', 'restart-notify.json');
   let heartbeatTimer = null;
+  let dashboard = null;
 
   let shuttingDown = false;
   let shutdownPromise = null;
@@ -168,6 +170,12 @@ async function main() {
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
+        }
+        if (dashboard) {
+          await dashboard.stop().catch((err) => {
+            console.error('[dashboard] stop failed:', err?.message || err);
+          });
+          dashboard = null;
         }
         if (typeof bot.stopScheduleLoop === 'function') {
           bot.stopScheduleLoop();
@@ -227,6 +235,23 @@ async function main() {
     restartService,
     autostart
   });
+
+  if (settings.dashboard?.enabled) {
+    dashboard = createDashboardServer({
+      appSettings: settings.app,
+      codexSettings: settings.codex,
+      dashboardSettings: settings.dashboard,
+      scheduleSettings: settings.schedule,
+      skillSettings: settings.skills,
+      whisperSettings: settings.whisper,
+      codex,
+      memory,
+      store,
+      restartService,
+      autostart
+    });
+    await dashboard.start();
+  }
 
   const launchPromise = bot.launch();
   let launchResolvedInTime = false;

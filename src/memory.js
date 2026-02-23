@@ -671,6 +671,8 @@ export class MemoryEngine {
       'Do not send acknowledgement/status text about memory unless the user explicitly asks about memory.',
       'If you produce image outputs intended for the user, append one line per image exactly as: IMAGE_OUTPUT: <absolute_path_or_url>.',
       'Do not add extra commentary to IMAGE_OUTPUT lines.',
+      'Prefer clean plain-text formatting for Telegram replies. Avoid markdown styling markers like **bold**, _italics_, and inline backticks unless explicitly requested.',
+      'Keep response sentences short and readable; avoid long unbroken paragraphs.',
       'Answer only the user request directly, in natural conversational language.'
     ];
 
